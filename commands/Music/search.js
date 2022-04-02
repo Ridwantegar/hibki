@@ -1,15 +1,16 @@
 const { Util, MessageEmbed } = require("discord.js");
 const ytdl = require("ytdl-core");
-const ytdlDiscord = require("ytdl-core-discord");
 const yts = require("yt-search");
-const fs = require('fs');
+const ytdlDiscord = require("ytdl-core-discord");
+const YouTube = require("youtube-sr");
 const sendError = require("../../Util/error")
+const fs = require('fs');
 
 module.exports = {
-    name: "play",
-    description: "To play songs :D",
-    usage: "<YouTube_URL> | <song_name>",
-    aliases: ["p"],
+    name: "search",
+    description: "To search songs :D",
+    usage: "<song_name>",
+    aliases: ["sc"],
 
   run: async (client, message, args) => {
     let channel = message.member.voice.channel;
@@ -20,53 +21,63 @@ module.exports = {
     if (!permissions.has("SPEAK"))return sendError("I cannot speak in this voice channel, make sure I have the proper permissions!", message.channel);
 
     var searchString = args.join(" ");
-    if (!searchString)return sendError("You didn't provide what do I have to want play", message.channel);
-   	const url = args[0] ? args[0].replace(/<(.+)>/g, "$1") : "";
-   var serverQueue = message.client.queue.get(message.guild.id);
+    if (!searchString)return sendError("You didn't poivide want i want to search", message.channel);
 
-     let songInfo = null;
-    let song = null;
-    if (url.match(/^(https?:\/\/)?(www\.)?(m\.)?(youtube\.com|youtu\.?be)\/.+$/gi)) {
-       try {
-          songInfo = await ytdl.getInfo(url)
-          if(!songInfo)return sendError("Looks like i was unable to find the song on YouTube", message.channel);
-        song = {
-       id: songInfo.videoDetails.videoId,
-       title: songInfo.videoDetails.title,
-       url: songInfo.videoDetails.video_url,
-       img: songInfo.player_response.videoDetails.thumbnail.thumbnails[0].url,
-      duration: songInfo.videoDetails.lengthSeconds,
-      ago: songInfo.videoDetails.publishDate,
-      views: String(songInfo.videoDetails.viewCount).padStart(10, ' '),
-      req: message.author
+    var serverQueue = message.client.queue.get(message.guild.id);
+    try {
+           var searched = await YouTube.search(searchString, { limit: 10 });
+          if (searched[0] == undefined)return sendError("Looks like i was unable to find the song on YouTube", message.channel);
+                    let index = 0;
+                    let embedPlay = new MessageEmbed()
+                        .setColor("BLUE")
+                        .setAuthor(`Results for \"${args.join(" ")}\"`, message.author.displayAvatarURL())
+                        .setDescription(`${searched.map(video2 => `**\`${++index}\`  |** [\`${video2.title}\`](${video2.url}) - \`${video2.durationFormatted}\``).join("\n")}`)
+                        .setFooter("Type the number of the song to add it to the playlist");
+                    // eslint-disable-next-line max-depth
+                    message.channel.send(embedPlay).then(m => m.delete({
+                        timeout: 15000
+                    }))
+                    try {
+                        var response = await message.channel.awaitMessages(message2 => message2.content > 0 && message2.content < 11, {
+                            max: 1,
+                            time: 20000,
+                            errors: ["time"]
+                        });
+                    } catch (err) {
+                        console.error(err);
+                        return message.channel.send({
+                            embed: {
+                                color: "RED",
+                                description: "Nothing has been selected within 20 seconds, the request has been canceled."
+                            }
+                        });
+                    }
+                    const videoIndex = parseInt(response.first().content);
+                    var video = await (searched[videoIndex - 1])
+		    
+                } catch (err) {
+                    console.error(err);
+                    return message.channel.send({
+                        embed: {
+                            color: "RED",
+                            description: "🆘  **|**  I could not obtain any search results"
+                        }
+                    });
+                }
+            
+            response.delete();
+  var songInfo = video
 
-        };
-
-      } catch (error) {
-        console.error(error);
-        return message.reply(error.message).catch(console.error);
-      }
-    }else {
-      try {
-        var searched = await yts.search(searchString);
-    if(searched.videos.length === 0)return sendError("Looks like i was unable to find the song on YouTube", message.channel)
-    
-     songInfo = searched.videos[0]
-        song = {
-      id: songInfo.videoId,
+    const song = {
+      id: songInfo.id,
       title: Util.escapeMarkdown(songInfo.title),
       views: String(songInfo.views).padStart(10, ' '),
-      url: songInfo.url,
-      ago: songInfo.ago,
-      duration: songInfo.duration.toString(),
-      img: songInfo.image,
+      ago: songInfo.uploadedAt,
+      duration: songInfo.durationFormatted,
+      url: `https://www.youtube.com/watch?v=${songInfo.id}`,
+      img: songInfo.thumbnail.url,
       req: message.author
-        };
-      } catch (error) {
-        console.error(error);
-        return message.reply(error.message).catch(console.error);
-      }
-    }
+    };
 
     if (serverQueue) {
       serverQueue.songs.push(song);
@@ -81,7 +92,7 @@ module.exports = {
       return message.channel.send(thing);
     }
 
-    const queueConstruct = {
+   const queueConstruct = {
       textChannel: message.channel,
       voiceChannel: channel,
       connection: null,
@@ -95,7 +106,7 @@ module.exports = {
 
     const play = async (song) => {
       const queue = message.client.queue.get(message.guild.id);
-    let afk = JSON.parse(fs.readFileSync("./afk.json", "utf8"));
+      let afk = JSON.parse(fs.readFileSync("./afk.json", "utf8"));
        if (!afk[message.guild.id]) afk[message.guild.id] = {
         afk: false,
     };
@@ -108,7 +119,7 @@ module.exports = {
       }
             return message.client.queue.delete(message.guild.id);
 }
- let stream = null; 
+let stream = null; 
     if (song.url.includes("youtube.com")) {
       
       stream = await ytdl(song.url);
@@ -118,20 +129,21 @@ stream.on('error', function(er)  {
         queue.songs.shift();
         play(queue.songs[0]);
   	  return sendError(`An unexpected error has occurred.\nPossible type \`${er}\``, message.channel)
-          }
-        }
-    });
-}
-    queue.connection.on("disconnect", () => message.client.queue.delete(message.guild.id));
 
+       }
+      }
+    });  
+}
+ 
+    queue.connection.on("disconnect", () => message.client.queue.delete(message.guild.id));
       const dispatcher = queue.connection
          .play(ytdl(song.url, {quality: 'highestaudio', highWaterMark: 1 << 25 ,type: "opus"}))
-         .on("finish", () => {
+      .on("finish", () => {
            const shiffed = queue.songs.shift();
             if (queue.loop === true) {
                 queue.songs.push(shiffed);
             };
-          play(queue.songs[0])
+          play(queue.songs[0]);
         })
 
       dispatcher.setVolumeLogarithmic(queue.volume / 100);
@@ -149,6 +161,7 @@ stream.on('error', function(er)  {
     try {
       const connection = await channel.join();
       queueConstruct.connection = connection;
+      channel.guild.voice.setSelfDeaf(true)
       play(queueConstruct.songs[0]);
     } catch (error) {
       console.error(`I could not join the voice channel: ${error}`);
@@ -156,9 +169,7 @@ stream.on('error', function(er)  {
       await channel.leave();
       return sendError(`I could not join the voice channel: ${error}`, message.channel);
     }
-  
-
-
-},
+ 
+  },
 
 };
